@@ -32,6 +32,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 
 import condensation_guard as cg
+import guard_http
 
 MAX_POINTS = 100_000          # ~11 days at 10 s
 WINDOWS = {"15 min": 15, "1 h": 60, "4 h": 240, "12 h": 720, "24 h": 1440, "tutto": None}
@@ -120,6 +121,8 @@ class GuardGUI(tk.Tk):
             self._log(f"Storico caricato da {args.log_dir}: {len(hist['ts'])} punti (ultime 24 h)")
             self.win_var.set("24 h")
             self.dirty = True
+
+        guard_http.start_in_background(args.http_port, args.log_dir, log=self._log)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.after(300, self._poll)
@@ -323,8 +326,13 @@ class GuardGUI(tk.Tk):
             else:
                 fmt = "{:+.2f}" if k == "surf_margin" else ("{:.1f}" if k == "RH1" else "{:.2f}")
                 var.set(f"{fmt.format(x)} {unit}")
-        self._set_mode(r["mode"])
-        self.stat_var.set(f"Ultimo aggiornamento {r['time']}   |   stato LAUDA: {r['lauda_stat'] or '--'}")
+        if r.get("lauda_ok", 1):
+            self._set_mode(r["mode"])
+            lauda = r["lauda_stat"] or "--"
+        else:                                    # loop running but chiller not controlled
+            self.mode_lbl.configure(text=f"{r['mode']} / NO LAUDA", bg=MODE_COLORS["FAILSAFE"])
+            lauda = "NON RISPONDE (riconnessione in corso)"
+        self.stat_var.set(f"Ultimo aggiornamento {r['time']}   |   stato LAUDA: {lauda}")
 
     def _redraw(self):
         self.dirty = False
