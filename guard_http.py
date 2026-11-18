@@ -184,10 +184,13 @@ async function refresh() {
   if (!r) return;
   const f = (v, n=2) => v == null ? "-" : v.toFixed(n);
   const m = document.getElementById("mode");
-  m.textContent = r.mode; m.style.background = COLORS[r.mode] || "#757575";
+  // lauda_ok is missing in logs written before it existed
+  const noLauda = r.lauda_ok != null && r.lauda_ok !== "" && Number(r.lauda_ok) === 0;
+  m.textContent = noLauda ? r.mode + " / NO LAUDA" : r.mode;
+  m.style.background = noLauda ? COLORS.FAILSAFE : (COLORS[r.mode] || "#757575");
   document.getElementById("status").textContent =
     `Tamb ${f(r.T1)}  RH ${f(r.RH1,1)}  Td ${f(r.Td)}  m ${f(r.surf_margin)}  ` +
-    `SP ${f(r.sp_active,1)}  PV ${f(r.pv)}  stat ${r.lauda_stat}`;
+    `SP ${f(r.sp_active,1)}  PV ${f(r.pv)}  stat ${noLauda ? "LAUDA NON RISPONDE" : r.lauda_stat}`;
   const age = (Date.now() - new Date(r.time)) / 1000;
   const a = document.getElementById("age");
   a.textContent = `(${r.time}, ${Math.round(age)} s fa)`;

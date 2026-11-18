@@ -326,8 +326,13 @@ class GuardGUI(tk.Tk):
             else:
                 fmt = "{:+.2f}" if k == "surf_margin" else ("{:.1f}" if k == "RH1" else "{:.2f}")
                 var.set(f"{fmt.format(x)} {unit}")
-        self._set_mode(r["mode"])
-        self.stat_var.set(f"Ultimo aggiornamento {r['time']}   |   stato LAUDA: {r['lauda_stat'] or '--'}")
+        if r.get("lauda_ok", 1):
+            self._set_mode(r["mode"])
+            lauda = r["lauda_stat"] or "--"
+        else:                                    # loop running but chiller not controlled
+            self.mode_lbl.configure(text=f"{r['mode']} / NO LAUDA", bg=MODE_COLORS["FAILSAFE"])
+            lauda = "NON RISPONDE (riconnessione in corso)"
+        self.stat_var.set(f"Ultimo aggiornamento {r['time']}   |   stato LAUDA: {lauda}")
 
     def _redraw(self):
         self.dirty = False

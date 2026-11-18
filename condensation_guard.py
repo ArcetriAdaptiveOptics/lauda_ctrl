@@ -271,7 +271,8 @@ class CondensationGuard:
 # ---------------------------------------------------------------------------
 class GuardRunner:
     FIELDS = ["time", "T1", "RH1", "T2", "T3", "Td", "surf_margin", "bump",
-              "target", "sp_cmd", "sp_active", "pv", "mode", "lauda_stat"]
+              "target", "sp_cmd", "sp_active", "pv", "mode", "lauda_stat", "lauda_ok"]
+    MAX_LAUDA_ERRORS = 3       # consecutive failed cycles before reconnecting
 
     def __init__(self, port=DEFAULT_PORT, thor_ip=DEFAULT_THOR_IP, cfg=None,
                  baud=9600, rtscts=False, interval=10.0, dry_run=False,
@@ -286,8 +287,27 @@ class GuardRunner:
         self.guard = None
         self._f_log = None
         self._w = None
+        self.lauda_errors = 0
 
     # -- setup / teardown -----------------------------------------------
+    def _drop_chiller(self):
+        if self.chiller is not None:
+            self.chiller.close()
+            self.chiller = None
+
+    def _reconnect_chiller(self):
+        """Reopen the chiller link (e.g. Moxa TCP connection lost). True if OK."""
+        try:
+            self.chiller = Microcool(self.port, self.baud, rtscts=self.rtscts)
+            self.sp_active = self.chiller.setpoint()
+        except (LaudaError, serial.SerialException, ValueError, OSError) as e:
+            self._drop_chiller()
+            self.log(f"[lauda] reconnect to {self.port} failed: {e}")
+            return False
+        self.lauda_errors = 0
+        self.log(f"[lauda] reconnected to {self.port}, SP={self.sp_active:.2f}")
+        return True
+
     def open(self):
         self.chiller = Microcool(self.port, self.baud, rtscts=self.rtscts)
         try:
@@ -336,19 +356,29 @@ class GuardRunner:
         sp_cmd, info = self.guard.step(data, dt)
         sp_round = round(sp_cmd, 1)
 
-        stat, pv = "", NAN
-        try:
-            pv = self.chiller.outflow_temp()
-            stat = self.chiller.fault_string()
-            diff = abs(sp_round - self.sp_active)
-            if (diff > self.cfg.deadband or info["mode"] == "FAILSAFE") and diff >= 0.05:
-                if not self.dry_run:
-                    self.chiller.set_setpoint(sp_round)
-                    self.sp_active = self.chiller.setpoint()
-                else:
-                    self.sp_active = sp_round
-        except (LaudaError, serial.SerialException, ValueError) as e:
-            self.log(f"[lauda] {e}")
+        stat, pv, lauda_ok = "", NAN, False
+        # the link is opened once; after a network drop the Moxa connection is
+        # gone for good, so reopen it instead of failing on every cycle
+        if self.chiller is not None or self._reconnect_chiller():
+            try:
+                pv = self.chiller.outflow_temp()
+                stat = self.chiller.fault_string()
+                diff = abs(sp_round - self.sp_active)
+                if (diff > self.cfg.deadband or info["mode"] == "FAILSAFE") and diff >= 0.05:
+                    if not self.dry_run:
+                        self.chiller.set_setpoint(sp_round)
+                        self.sp_active = self.chiller.setpoint()
+                    else:
+                        self.sp_active = sp_round
+                lauda_ok, self.lauda_errors = True, 0
+            except (LaudaError, serial.SerialException, ValueError, OSError) as e:
+                self.lauda_errors += 1
+                self.log(f"[lauda] {e}")
+                # a closed/broken port never recovers by itself; timeouts may
+                if (isinstance(e, (serial.SerialException, OSError))
+                        or self.lauda_errors >= self.MAX_LAUDA_ERRORS):
+                    self.log("[lauda] link lost, reconnecting at next cycle")
+                    self._drop_chiller()
 
         g = lambda port, i: data.get(port, (NAN, NAN))[i]
         now = datetime.now()
@@ -359,7 +389,7 @@ class GuardRunner:
                "bump": info.get("bump", NAN),
                "target": info.get("target", NAN),
                "sp_cmd": sp_cmd, "sp_active": self.sp_active, "pv": pv,
-               "mode": info["mode"], "lauda_stat": stat}
+               "mode": info["mode"], "lauda_stat": stat, "lauda_ok": int(lauda_ok)}
         self._w.writerow({k: (f"{v:.2f}" if isinstance(v, float) else v)
                           for k, v in row.items() if k in self.FIELDS})
         self._f_log.flush()

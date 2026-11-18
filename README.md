@@ -8,6 +8,11 @@ with an integral correction on the coldest monitored surface (feedback), rate-li
 and clamped to the device limits. On loss of Thor data the set point goes to a
 fail-safe value.
 
+If the chiller link breaks (e.g. the Moxa TCP connection is dropped by a network
+outage) or the chiller does not answer for 3 cycles, the link is reopened at
+the next cycle; the `lauda_ok` column of the log is 0 while the chiller is not
+controlled, and the GUI and web viewer show `NO LAUDA`.
+
 ## Hardware
 
 | Item | Address / setting |
