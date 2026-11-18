@@ -29,6 +29,9 @@ Usage (Windows):
     python condensation_guard.py --dry-run              # loop, never writes
     python condensation_guard.py                        # loop (Moxa 192.168.30.103, Thor 192.168.30.134)
     python condensation_guard_gui.py                    # GUI with plots
+
+The CSV logs are also served read-only over HTTP on --http-port (default
+3000, 0 = off), see guard_http.py.
 """
 
 __author__ = "Marco Bonaglia"
@@ -47,6 +50,8 @@ from datetime import datetime
 
 import requests
 import serial
+
+import guard_http
 
 DEFAULT_PORT = "socket://192.168.30.103:4660"   # Moxa NPort 5110A (or "COM3")
 DEFAULT_THOR_IP = "192.168.30.134"
@@ -452,6 +457,8 @@ def build_parser():
                    help="set point to leave on exit (default: leave last one)")
     p.add_argument("--dry-run", action="store_true", help="never write the chiller")
     p.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
+    p.add_argument("--http-port", type=int, default=guard_http.DEFAULT_HTTP_PORT,
+                   help="port of the web viewer of the CSV logs (0 = off)")
     return p
 
 
@@ -468,6 +475,7 @@ def main():
                  sp_max=a.sp_max, failsafe_sp=a.failsafe_sp)
     runner = GuardRunner(a.port, a.thor_ip, cfg, a.baud, a.rtscts, a.interval,
                          a.dry_run, a.exit_sp, a.log_dir)
+    guard_http.start_in_background(a.http_port, a.log_dir)
     try:
         runner.run()
     except KeyboardInterrupt:
